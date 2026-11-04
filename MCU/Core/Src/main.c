@@ -25,6 +25,7 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <ctype.h>
 
 #include "StateMachine.h"
 #include "uart.h"
@@ -429,12 +430,83 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+// Comparaison de chaînes insensible à la casse
+static uint8_t str_ieq(const char *a, const char *b)
+{
+  while (*a && *b)
+  {
+    if (tolower((unsigned char)*a) != tolower((unsigned char)*b))
+      return 0;
+    a++;
+    b++;
+  }
+  return (*a == '\0' && *b == '\0');
+}
+
+// Analyse les commandes reçues sur RS232_COM (UART3), terminées par '\r'
+static void CommandProcess(void)
+{
+  if (!message_complete3)
+    return;
+
+  char cmd[24];
+  uint8_t i = 0, j = 0;
+
+  // On saute les \r \n espaces en tête (reliquat d'un "\r\n" précédent)
+  while (i < RX_BUFFER3_SIZE && (rx_buffer3[i] == ' ' || rx_buffer3[i] == '\r' || rx_buffer3[i] == '\n'))
+    i++;
+
+  // Copie jusqu'au prochain \r ou \n
+  while (i < RX_BUFFER3_SIZE && rx_buffer3[i] != '\0' &&
+         rx_buffer3[i] != '\r' && rx_buffer3[i] != '\n' && j < sizeof(cmd) - 1)
+    cmd[j++] = rx_buffer3[i++];
+  cmd[j] = '\0';
+
+  // Espaces de fin
+  while (j > 0 && cmd[j - 1] == ' ')
+    cmd[--j] = '\0';
+
+  uint8_t consumed = 0;
+
+  if (str_ieq(cmd, "stream_enable"))
+  {
+    ina219_stream_enable = 1;
+    send_UART3("STREAM ENABLED\r\n");
+    consumed = 1;
+  }
+  else if (str_ieq(cmd, "stream_disable"))
+  {
+    ina219_stream_enable = 0;
+    StateMachine_Resume();
+    send_UART3("STREAM DISABLED\r\n");
+    consumed = 1;
+  }
+  else if (ina219_stream_enable && cmd[0] != '\0')
+  {
+    // En mode stream, la machine d'états est à l'arrêt : on ne laisse pas traîner d'autres messages
+    send_UART3("CMD inconnue (mode stream)\r\n");
+    consumed = 1;
+  }
+
+  if (consumed)
+  {
+    message_complete3 = 0;
+    memset(rx_buffer3, 0, RX_BUFFER3_SIZE);
+  }
+  // Sinon on ne touche à rien : le message reste disponible pour la machine d'état
+}
+
 void StartStateMachineTask(void *argument)
 {
   for (;;)
   {
-    StateMachineTask();
-    osDelay(50);
+    CommandProcess();
+
+    if (!ina219_stream_enable)
+    {
+      StateMachineTask();
+    }
+    osDelay(50);          // <-- TOUJOURS exécuté, même en mode stream
   }
 }
 
@@ -450,6 +522,7 @@ void StartINA219Task(void *argument)
   }
 
   uint32_t next = osKernelGetTickCount();
+
   for (;;)
   {
     if (INA219_Read(&d) == HAL_OK)
@@ -465,7 +538,8 @@ void StartINA219Task(void *argument)
     else
     {
       ina219_valid = 0;
-      send_UART3("INA219: read ERR\r\n");
+      if (ina219_stream_enable)                       // <-- AJOUTER cette condition
+        send_UART3("INA219: read ERR\r\n");
       INA219_Recover();
     }
 

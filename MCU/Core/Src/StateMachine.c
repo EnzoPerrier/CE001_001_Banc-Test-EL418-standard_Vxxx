@@ -19,12 +19,14 @@
 //---------------------------------------------------------------- Define
 
 #define MAX_PER_LENGTH 8
-#define BAT_TOLERANCE_V 0.5f // Ecart max entre mesure de tension MTI TEMPO et la valeur mesurée par l'INA219
+#define BAT_TOLERANCE_MV 200  // Ecart max entre mesure de tension MTI TEMPO et la valeur mesurée par l'INA219
+#define CURRENT_MAX_MA  90  // Courant max accepté
 
 //---------------------------------------------------------------- Variables
 
 uint8_t state = 0;
 char per_value[MAX_PER_LENGTH + 1];
+static bool action_done = 0;
 
 extern INA219_Data_t ina219_last;
 extern volatile uint8_t ina219_valid;
@@ -50,7 +52,6 @@ void parse_data_STS(char *buffer, TrameDataSTS *data);
 
 void StateMachineTask(void)
 {
-    static bool action_done = 0;
     static bool bp_pressed = 0, bp3_pressed = 0, bp4_pressed = 0;
 
     //--------------------------- Vérification de l'appui sur BP3 pour revenir à l'étape précédente
@@ -169,22 +170,39 @@ void StateMachineTask(void)
             }
             else
             {
-                float ref_V = ina.bus_mV / 1000.0f;
-                float diff  = data.bat - ref_V;
-                if (diff < 0)
-                    diff = -diff;
+            	// --- Contrôle de la tension BAT par rapport à l'INA219 ---
+            	int32_t bat_mV  = (int32_t)(data.bat * 1000.0f);
+            	int32_t diff_mV = bat_mV - ina.bus_mV;
+            	if (diff_mV < 0)
+            	    diff_mV = -diff_mV;
 
-                if (diff <= BAT_TOLERANCE_V)
+            	if (diff_mV <= BAT_TOLERANCE_MV)
+            	{
+            	    bat_ok = true;
+            	}
+            	else
+            	{
+            	    char msg[90];
+            	    snprintf(msg, sizeof(msg),
+            	             "STS NOK: BAT=%ld mV, INA219=%ld mV (ecart > %d mV) !!\r\n",
+            	             (long)bat_mV, (long)ina.bus_mV, BAT_TOLERANCE_MV);
+            	    send_UART3(msg);
+            	}
+
+                // --- Contrôle du courant consommé ---
+                int32_t i_uA = ina.current_uA;
+                if (i_uA < 0)
+                    i_uA = -i_uA;                     // valeur absolue (au cas où le shunt serait câblé à l'envers)
+
+                if (i_uA > (int32_t)CURRENT_MAX_MA * 1000)
                 {
-                    bat_ok = true;
-                }
-                else
-                {
-                    char msg[90];
+                    int32_t ma10 = i_uA / 100;        // courant en 0.1 mA
+                    char msg[70];
                     snprintf(msg, sizeof(msg),
-                             "STS NOK: BAT=%d mV, INA219=%ld mV (ecart > %d mV) !!\r\n",
-                             (int)(data.bat * 1000.0f), (long)ina.bus_mV, (int)(BAT_TOLERANCE_V * 1000.0f));
+                             "STS NOK: COURANT=%ld.%ld mA (> %d mA) !!\r\n",
+                             (long)(ma10 / 10), (long)(ma10 % 10), CURRENT_MAX_MA);
                     send_UART3(msg);
+                    bat_ok = false;                   // l'étape 2 échoue
                 }
             }
 
@@ -854,4 +872,15 @@ void parse_data_STS(char *buffer, TrameDataSTS *data)
 
         line = strtok(NULL, "\r\n");
     }
+}
+
+
+// Appelée à la sortie du mode stream : retour à l'étape 0
+void StateMachine_Resume(void)
+{
+    state = 0;
+    action_done = 0;              // l'étape 0 rejouera son initialisation
+    memset(rx_buffer1, 0, RX_BUFFER1_SIZE);
+    rx_index1 = 0;
+    message_complete1 = 0;
 }

@@ -10,5 +10,6 @@
 
 
 void StateMachineTask(void);
+void StateMachine_Resume(void);
 
 #endif /* INC_STATEMACHINE_H_ */
