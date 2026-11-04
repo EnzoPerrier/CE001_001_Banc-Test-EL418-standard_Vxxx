@@ -7,6 +7,7 @@
 
 #include "uart.h"
 #include "main.h"
+#include "cmsis_os.h"
 
 #include "stm32f1xx_hal.h"
 #include "stm32f1xx_hal_uart.h"
@@ -164,9 +165,25 @@ void MX_USART3_UART_Init(void)
   /* USER CODE END USART3_Init 2 */
 }
 
+//MUTEX pour protéger l'envoi car le thread statemachine ecrit en meme temps que la mesure de courant tension
+
+static osMutexId_t uart3Mutex = NULL;
+
+void UART3_MutexInit(void)
+{
+  uart3Mutex = osMutexNew(NULL);
+}
+
 void send_UART3(const char *msg)
 {
+  // Pas de mutex avant le démarrage du scheduler, ni dans Error_Handler (IRQ coupées)
+  uint8_t use_mutex = (uart3Mutex != NULL) &&
+                      (osKernelGetState() == osKernelRunning) &&
+                      !__get_PRIMASK();
+
+  if (use_mutex) osMutexAcquire(uart3Mutex, osWaitForever);
   HAL_UART_Transmit(&huart3, (uint8_t *)msg, strlen(msg), HAL_MAX_DELAY);
+  if (use_mutex) osMutexRelease(uart3Mutex);
 }
 
 void clear_rx_buffer3(void)

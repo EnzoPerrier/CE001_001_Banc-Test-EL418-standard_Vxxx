@@ -43,6 +43,7 @@ extern uint8_t rx_buffer3[RX_BUFFER3_SIZE];
 void MX_USART3_UART_Init(void);
 
 void send_UART3(const char *msg);
+void UART3_MutexInit(void);
 void clear_rx_buffer3(void);
 
 

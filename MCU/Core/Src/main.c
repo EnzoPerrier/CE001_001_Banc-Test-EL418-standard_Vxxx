@@ -28,6 +28,7 @@
 
 #include "StateMachine.h"
 #include "uart.h"
+#include "ina219.h"
 
 /* USER CODE END Includes */
 
@@ -68,6 +69,17 @@ const osThreadAttr_t StateMachineTask_attributes = {
     .priority = (osPriority_t)osPriorityNormal,
 };
 
+osThreadId_t INA219TaskHandle;
+const osThreadAttr_t INA219Task_attributes = {
+    .name = "INA219Task",
+    .stack_size = 256 * 4,
+    .priority = (osPriority_t)osPriorityBelowNormal,
+};
+
+volatile uint8_t ina219_stream_enable = 0; // 1 = envoi continu (debug), servira plus tard pour la commande RS232
+INA219_Data_t ina219_last;                 // dernière mesure, utilisable par la future commande "lecture"
+volatile uint8_t ina219_valid = 0;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -80,6 +92,7 @@ void StartDefaultTask(void *argument);
 
 /* USER CODE BEGIN PFP */
 void StartStateMachineTask(void *argument);
+void StartINA219Task(void *argument);
 
 /* USER CODE END PFP */
 
@@ -132,6 +145,7 @@ int main(void)
 
   /* USER CODE BEGIN RTOS_MUTEX */
   /* add mutexes, ... */
+  UART3_MutexInit();
   /* USER CODE END RTOS_MUTEX */
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
@@ -153,6 +167,7 @@ int main(void)
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
   StateMachineTaskHandle = osThreadNew(StartStateMachineTask, NULL, &StateMachineTask_attributes);
+  INA219TaskHandle = osThreadNew(StartINA219Task, NULL, &INA219Task_attributes);
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
@@ -420,6 +435,42 @@ void StartStateMachineTask(void *argument)
   {
     StateMachineTask();
     osDelay(50);
+  }
+}
+
+void StartINA219Task(void *argument)
+{
+  char msg[80];
+  INA219_Data_t d;
+
+  osDelay(100);
+  if (INA219_Init(&hi2c1) != HAL_OK)
+  {
+    send_UART3("INA219: init ERR\r\n");
+  }
+
+  uint32_t next = osKernelGetTickCount();
+  for (;;)
+  {
+    if (INA219_Read(&d) == HAL_OK)
+    {
+      ina219_last = d;
+      ina219_valid = 1;
+      if (ina219_stream_enable)
+      {
+        INA219_Format(&d, msg, sizeof(msg));
+        send_UART3(msg);
+      }
+    }
+    else
+    {
+      ina219_valid = 0;
+      send_UART3("INA219: read ERR\r\n");
+      INA219_Recover();
+    }
+
+    next += 1000;            // 1 mesure / seconde
+    osDelayUntil(next);
   }
 }
 

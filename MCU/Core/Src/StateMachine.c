@@ -10,6 +10,7 @@
 
 #include "StateMachine.h"
 #include "uart.h"
+#include "ina219.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -18,11 +19,15 @@
 //---------------------------------------------------------------- Define
 
 #define MAX_PER_LENGTH 8
+#define BAT_TOLERANCE_V 0.5f // Ecart max entre mesure de tension MTI TEMPO et la valeur mesurée par l'INA219
 
 //---------------------------------------------------------------- Variables
 
 uint8_t state = 0;
 char per_value[MAX_PER_LENGTH + 1];
+
+extern INA219_Data_t ina219_last;
+extern volatile uint8_t ina219_valid;
 
 //---------------------------------------------------------------- typedef
 
@@ -149,15 +154,38 @@ void StateMachineTask(void)
                 send_UART3("STS NOK: Valeur ACCU hors plage !!\r\n");
             }
 
-            // Vérification BAT
-            if (data.bat >= 11.0 && data.bat <= 14.0)
+            // Vérification BAT : comparaison avec la tension mesurée par l'INA219 (± BAT_TOLERANCE_V)
+            INA219_Data_t ina;
+            uint8_t ina_ok;
+
+            osKernelLock();              // copie cohérente (la tâche INA219 écrit la structure en parallèle)
+            ina    = ina219_last;
+            ina_ok = ina219_valid;
+            osKernelUnlock();
+
+            if (!ina_ok)
             {
-                // send_UART3("Tension batterie OK\r\n"); // Utile pour test via
-                bat_ok = true;
+                send_UART3("STS NOK: INA219 indisponible, verification BAT impossible !!\r\n");
             }
             else
             {
-                send_UART3("STS NOK: Valeur BAT hors plage !!\r\n");
+                float ref_V = ina.bus_mV / 1000.0f;
+                float diff  = data.bat - ref_V;
+                if (diff < 0)
+                    diff = -diff;
+
+                if (diff <= BAT_TOLERANCE_V)
+                {
+                    bat_ok = true;
+                }
+                else
+                {
+                    char msg[90];
+                    snprintf(msg, sizeof(msg),
+                             "STS NOK: BAT=%d mV, INA219=%ld mV (ecart > %d mV) !!\r\n",
+                             (int)(data.bat * 1000.0f), (long)ina.bus_mV, (int)(BAT_TOLERANCE_V * 1000.0f));
+                    send_UART3(msg);
+                }
             }
 
             // Transition si tout est bon

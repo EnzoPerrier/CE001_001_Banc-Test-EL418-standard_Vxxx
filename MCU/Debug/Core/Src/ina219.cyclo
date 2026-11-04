@@ -1,0 +1,6 @@
+../Core/Src/ina219.c:32:26:ina_write16	1
+../Core/Src/ina219.c:38:26:ina_read16	2
+../Core/Src/ina219.c:49:19:INA219_Init	2
+../Core/Src/ina219.c:60:19:INA219_Recover	3
+../Core/Src/ina219.c:72:19:INA219_Read	3
+../Core/Src/ina219.c:94:6:INA219_Format	4
