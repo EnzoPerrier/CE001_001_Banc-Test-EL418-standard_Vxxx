@@ -145,7 +145,7 @@ void StateMachineTask(void)
             send_UART3((char *)rx_buffer1); // On a besoin de traiter la trame dans le logiciel de test
 
             // Vérification ACC
-            if (data.acc >= 8.0 && data.acc <= 10.0)
+            if (data.acc >= 8.0f && data.acc <= 10.0f)
             {
                 // send_UART3("Accu OK\n"); // Utile pour test via terminal
                 acc_ok = true;
@@ -174,7 +174,7 @@ void StateMachineTask(void)
             	int32_t bat_mV  = (int32_t)(data.bat * 1000.0f);
             	int32_t diff_mV = bat_mV - ina.bus_mV;
             	if (diff_mV < 0)
-            	    diff_mV = -diff_mV;
+            	    diff_mV = -diff_mV; // Valeur absolue
 
             	if (diff_mV <= BAT_TOLERANCE_MV)
             	{
@@ -196,7 +196,7 @@ void StateMachineTask(void)
 
                 if (i_uA > (int32_t)CURRENT_MAX_MA * 1000)
                 {
-                    int32_t ma10 = i_uA / 100;        // courant en 0.1 mA
+                    int32_t ma10 = i_uA / 100.0f;        // courant en 0.1 mA
                     char msg[70];
                     snprintf(msg, sizeof(msg),
                              "STS NOK: COURANT=%ld.%ld mA (> %d mA) !!\r\n",

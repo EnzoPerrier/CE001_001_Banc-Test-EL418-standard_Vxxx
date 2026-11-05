@@ -40,6 +40,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define CURRENT_MAX_MA  100.0f  // Seuil de sécurité courant
 
 /* USER CODE END PD */
 
@@ -534,11 +535,12 @@ void StartINA219Task(void *argument)
         INA219_Format(&d, msg, sizeof(msg));
         send_UART3(msg);
       }
+
     }
     else
     {
       ina219_valid = 0;
-      if (ina219_stream_enable)                       // <-- AJOUTER cette condition
+      if (ina219_stream_enable)
         send_UART3("INA219: read ERR\r\n");
       INA219_Recover();
     }
